@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+daemon not running for EXTRA/recall
+--- stderr

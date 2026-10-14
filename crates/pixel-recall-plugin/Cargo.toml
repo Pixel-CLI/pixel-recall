@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: The Pixel contributors
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "pixel-recall-plugin"
+description = "Pixel plugin: recall, machine-wide search over every agent CLI's transcripts, behind the pixel-recall binary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "pixel_recall_plugin"
+path = "src/lib.rs"
+
+# The only binary: `pixel recall <subcommand>` is `pixel-recall <subcommand>`.
+[[bin]]
+name = "pixel-recall"
+path = "src/main.rs"
+
+[features]
+# Embedding backends, as in the `pixel` binary. fastembed (ONNX) cannot build
+# for *-unknown-linux-musl; model2vec is pure Rust.
+default = ["fastembed", "model2vec"]
+fastembed = ["pixel-recall/fastembed"]
+model2vec = ["pixel-recall/model2vec"]
+# Scratch directories and the comparison with the core build used by the tests.
+testing = ["dep:tempfile"]
+
+[dependencies]
+clap = { workspace = true }
+# Core's library crates share a name with this plugin's package and binary;
+# `pixel_recall` below is core's corpus, `pixel_recall_plugin` is us.
+pixel-daemon = { workspace = true }
+pixel-proto = { workspace = true }
+pixel-recall = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+pixel-daemon = { workspace = true }
+pixel-recall-plugin = { path = ".", features = ["testing"] }
+tempfile = { workspace = true }

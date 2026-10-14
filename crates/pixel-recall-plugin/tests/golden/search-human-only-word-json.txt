@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"hits":[],"truncated":false,"turns_considered":0}
+--- stderr

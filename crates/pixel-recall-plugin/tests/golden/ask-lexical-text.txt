@@ -1,0 +1,5 @@
+exit: 0
+--- stdout
+claude:OID #1 t0 2025-10-09 08:53 /work/pixel [lex] "please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows not…"
+--- stderr
+note: semantic channel unavailable (no embedding model) — lexical-only answer

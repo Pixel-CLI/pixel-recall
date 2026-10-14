@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+no matches (0 turns considered) — the pattern does not appear in the indexed corpus
+--- stderr

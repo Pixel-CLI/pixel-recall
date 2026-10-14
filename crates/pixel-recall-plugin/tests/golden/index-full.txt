@@ -1,0 +1,5 @@
+exit: 0
+--- stdout
+--- stderr
+claude: 1 units (1 new, 0 appended, 0 rewritten, 0 unchanged) -> 1 sessions, 2 turns, 0 parse errors, N ms
+segments: 2 turns indexed into 1 new segment(s), N ms (1 segments total)

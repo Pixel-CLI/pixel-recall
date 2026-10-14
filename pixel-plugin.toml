@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: The Pixel contributors
+# SPDX-License-Identifier: MIT
+
+name = "recall"
+version = "0.1.0"
+api = 1
+description = "Search and browse the transcripts of every agent CLI on the machine: index, search, ask, show, export, context pack, and the corpus daemon."
+run = "bin/pixel-recall"
+capabilities = ["command"]
+# The plugin reaches the network once, on demand: `recall setup` and the first
+# semantic query download the embedding model. Everything else reads local
+# transcripts and the local corpus.
+network = true
+
+# Not read by plugin API 1 (the host ignores keys it does not know): the
+# commands this plugin answers to. `pixel recall` finds this plugin by its
+# name. tests/manifest.rs keeps the list equal to the commands the binary has.
+commands = [
+  "recall",
+]

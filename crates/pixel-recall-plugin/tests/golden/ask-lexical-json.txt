@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"groups":[{"agent":"claude","cwd":"/work/pixel","extra_hits":0,"matched_lexical":true,"matched_semantic":false,"score":0.OID,"seq":0,"session_id":1,"snippet":"please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows not…","source_session_id":"OID-0000-4000-8000-OID","title":"please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retr","ts":OID,"ts_source":"iso","turn_id":1}],"notice":"semantic channel unavailable (no embedding model) — lexical-only answer"}
+--- stderr

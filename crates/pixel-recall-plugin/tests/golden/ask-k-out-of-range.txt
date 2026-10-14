@@ -1,0 +1,4 @@
+exit: 1
+--- stdout
+--- stderr
+pixel: --k must be between 1 and 50

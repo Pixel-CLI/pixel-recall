@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"cap_bytes":4096,"session":{"agent":"claude","cwd":"/work/pixel","git_branch":"develop","id":1,"is_subagent":false,"parent_session_id":null,"source_path":"EXTRA/.claude/projects/-work-pixel/OID-0000-4000-8000-OID.jsonl","source_session_id":"OID-0000-4000-8000-OID","title":"please fix the streamed needle retry noise retry noise retry noise retry noise retry noise retry noise retry noise retry","ts_first":OID,"ts_last":OID,"ts_source":"iso","turn_count":2},"truncated":true,"truncated_arrays":[{"kept":0,"path":"turns","total":2}],"turns":[]}
+--- stderr

@@ -1,0 +1,5 @@
+exit: 0
+--- stdout
+{"count":1,"sessions":[{"agent":"claude","cwd":"/work/pixel","git_branch":"develop","id":1,"is_subagent":false,"parent_session_id":null,"source_path":"EXTRA/.claude/projects/-work-pixel/OID-0000-4000-8000-OID.jsonl","source_session_id":"OID-0000-4000-8000-OID","title":"please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retr","ts_first":OID,"ts_last":OID,"ts_source":"iso","turn_count":2}]}
+--- stderr
+recall: caught up 2 turns on demand

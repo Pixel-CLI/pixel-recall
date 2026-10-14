@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"agents":[{"agent":"claude","last_ingest_at":OID,"sessions":1,"turns":2}],"db_bytes":N,"embed_backlog":2,"lexical_segments":1,"location":"EXTRA/recall","total_turns":2,"unsegmented_turns":0,"vector_model":"","vector_segments":0}
+--- stderr

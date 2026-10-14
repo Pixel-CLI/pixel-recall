@@ -1,0 +1,5 @@
+exit: 0
+--- stdout
+{"hits":[{"agent":"claude","cwd":"/work/pixel","role":"user","seq":0,"session_id":1,"snippet":"please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing us…","snippet_truncated":true,"source_session_id":"OID-0000-4000-8000-OID","ts":OID,"ts_source":"iso","turn_id":1,"turn_truncated":false}],"truncated":false,"turns_considered":1}
+--- stderr
+recall: caught up 2 turns on demand

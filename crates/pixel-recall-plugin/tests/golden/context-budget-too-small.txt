@@ -1,0 +1,4 @@
+exit: 1
+--- stdout
+--- stderr
+pixel: --budget must be between 100 and 200000 tokens

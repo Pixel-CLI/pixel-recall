@@ -1,0 +1,12 @@
+exit: 0
+--- stdout
+recall context for: streamed needle
+note: semantic channel unavailable (no embedding model) — lexical-only answer
+- [claude:OID #1] 2025-10-09 08:53 /work/pixel "please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retr"
+  #1 t0 user: please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows not…
+
+--- session #1 turn 0 (user) ---
+please fix the streamed needle it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful it fails on the second retry and the log shows nothing useful
+
+fitted: budget=500 used=254 dropped_blocks=0
+--- stderr

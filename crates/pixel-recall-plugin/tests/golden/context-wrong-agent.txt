@@ -1,0 +1,7 @@
+exit: 0
+--- stdout
+recall context for: streamed needle
+note: semantic channel unavailable (no embedding model) — lexical-only answer
+
+fitted: budget=4000 used=29 dropped_blocks=0
+--- stderr

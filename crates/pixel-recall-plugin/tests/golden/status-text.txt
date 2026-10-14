@@ -1,0 +1,8 @@
+exit: 0
+--- stdout
+corpus: EXTRA/recall (N MB)
+claude           1 sessions         2 turns  last ingest DATE
+2 turns total
+lexical: 1 segment(s), 0 turn(s) searched unindexed (tail)
+semantic: no vectors yet — run `pixel recall setup` then `pixel recall embed`
+--- stderr
