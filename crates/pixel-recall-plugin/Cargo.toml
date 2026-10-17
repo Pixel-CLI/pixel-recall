@@ -23,8 +23,9 @@ name = "pixel-recall"
 path = "src/main.rs"
 
 [features]
-# Embedding backends, as in the `pixel` binary. fastembed (ONNX) cannot build
-# for *-unknown-linux-musl; model2vec is pure Rust.
+# Embedding backends, as in the `pixel` binary. fastembed (ONNX) has no
+# prebuilt runtime for *-unknown-linux-musl or x86_64-apple-darwin; model2vec
+# is pure Rust and builds everywhere.
 default = ["fastembed", "model2vec"]
 fastembed = ["pixel-recall/fastembed"]
 model2vec = ["pixel-recall/model2vec"]
