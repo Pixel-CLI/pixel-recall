@@ -34,7 +34,8 @@ pixel plugin enable recall     # the plugin declares network access (model downl
 
 The release assets are `pixel-recall-<target-triple>` executables, each with a
 `.sha256` file: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`.
+`x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` (Linux is
+musl: the triples `pixel install` asks for).
 
 From source, without Pixel's plugin management:
 
