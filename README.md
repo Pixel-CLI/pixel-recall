@@ -111,6 +111,17 @@ signals` honestly; nothing is inferred beyond the turns that exist.
   from the old `pixel-retro` skill of the core repo): no golden parity case
   is recorded for it; its behaviour is tested directly
   (`the_retro_pass_finds_friction_and_leaves_a_clean_session_quiet`).
+- **Old helper scripts are not carried over.** The `pixel-retro` skill's
+  Python helpers stayed in the core repo when the capability moved here:
+
+| Old helper | What it did | Retained here? | Why |
+| --- | --- | --- |
+| `lead_time.py` | measured PRs from first edit to validated CI, and where agents waited | ❌ left out | it reads the GitHub API, not the transcript corpus; a plugin that stays local-only is the point of issue #2 |
+| `adherence.py` | checked transcript behaviour against a repo's stated rules | ❌ left out | rule text is repo config, not corpus search — belongs in the core repo's own tooling, not a transcript plugin |
+| `slow.py` | grouped slow read ops from `.pixel/actions.jsonl` with their `serve` traces | ❌ left out | reads pixel's action log, which the core repo keeps writing; the plugin reads only its own corpus |
+| `roots.py` | enumerated repository roots from sessions in a window | ✅ subsumed | `pixel recall sessions --since` + the cwd the corpus already stores cover it |
+| `ledger.py` / `seen.tsv` | skipped frictions already reported/fixed | ❌ left out | a first-cut `retro` re-reports what it re-finds; a ledger is a follow-up, not a port |
+
 
 ## Where the code comes from
 
