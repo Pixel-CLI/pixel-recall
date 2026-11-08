@@ -490,9 +490,10 @@ fn run_context(
     index_after_catch_up(&store, &mut segments, written)?;
     let vectors = pixel_recall::vector::VectorStore::open(&pixel_recall::vectors_dir())?;
     let now = now_ms();
+    let repo_prefix = repo_or_resolved(&store, query, repo.as_deref())?;
     let filters = SearchFilters {
         agent,
-        repo_prefix: repo.as_deref().map(expand_repo),
+        repo_prefix,
         since_ms: since.as_deref().map(|s| parse_time(s, now)).transpose()?,
         until_ms: until.as_deref().map(|s| parse_time(s, now)).transpose()?,
         ..Default::default()
@@ -617,9 +618,10 @@ fn run_ask(
     let mut segments = SegmentSet::open(&pixel_recall::segments_dir())?;
     let vectors = pixel_recall::vector::VectorStore::open(&pixel_recall::vectors_dir())?;
     let now = now_ms();
+    let repo_prefix = repo_or_resolved(&store, query, repo.as_deref())?;
     let filters = SearchFilters {
         agent,
-        repo_prefix: repo.as_deref().map(expand_repo),
+        repo_prefix,
         since_ms: since.as_deref().map(|s| parse_time(s, now)).transpose()?,
         until_ms: until.as_deref().map(|s| parse_time(s, now)).transpose()?,
         role,
@@ -930,9 +932,10 @@ fn run_search(
         .as_deref()
         .map(|s| resolve_session(&store, s).map(|row| row.id))
         .transpose()?;
+    let repo_prefix = repo_or_resolved(&store, pattern, repo.as_deref())?;
     let filters = SearchFilters {
         agent,
-        repo_prefix: repo.as_deref().map(expand_repo),
+        repo_prefix,
         since_ms: since.as_deref().map(|s| parse_time(s, now)).transpose()?,
         until_ms: until.as_deref().map(|s| parse_time(s, now)).transpose()?,
         role,
@@ -1053,6 +1056,119 @@ fn expand_repo(repo: &str) -> String {
         return format!("{home}/{rest}");
     }
     repo.to_string()
+}
+
+/// A query word and a cwd path component match when equal or one edit
+/// apart (a mis-typed or voice-dictated name), case-insensitive. Every
+/// path component counts, so `g-1-tuyau`, `Documents` and the basename
+/// all take part.
+fn name_matches(query_word: &str, component: &str) -> bool {
+    let (a, b) = (query_word.to_lowercase(), component.to_lowercase());
+    if a == b || a.len() < 4 || b.len() < 4 {
+        return a == b;
+    }
+    let (short, long) = if a.len() <= b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    match long.len() - short.len() {
+        // Same length: one substitution is one edit. The skip loop below
+        // cannot express it (the skipped long char is re-consumed).
+        0 => a.bytes().zip(b.bytes()).filter(|(x, y)| x != y).count() <= 1,
+        // One apart: one insertion in the longer, one alignment exact.
+        1 => {
+            let mut skipped = false;
+            let mut it = long.chars();
+            for sc in short.chars() {
+                loop {
+                    let Some(lc) = it.next() else { return false };
+                    if sc == lc {
+                        break;
+                    }
+                    if skipped {
+                        return false;
+                    }
+                    skipped = true;
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Resolve a project named in `query` against the indexed cwds: the
+/// corpus is the source of truth, so a project that exists only as
+/// transcripts still matches and a folder never worked in is never
+/// guessed. One winner: `Some(path)` to filter on. Several or none:
+/// `None` — the search runs unfiltered, and the groups it prints each
+/// carry their session's cwd, so an ambiguous name disambiguates itself
+/// in the answer.
+fn resolve_repo_from_query<'a>(
+    query: &str,
+    cwds: impl Iterator<Item = Option<&'a str>>,
+) -> Option<&'a str> {
+    let words: Vec<String> = query
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| {
+            w.len() >= 3 && !matches!(w.to_lowercase().as_str(), "the" | "and" | "for" | "from")
+        })
+        .map(ToString::to_string)
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let mut winners: Vec<&str> = Vec::new();
+    for cwd in cwds {
+        let Some(cwd) = cwd else { continue };
+        if !cwd.starts_with('/') {
+            continue; // a bare directory name, not a path
+        }
+        // Components split on non-alphanumerics too, so `g-1-tuyau`
+        // exposes `tuyau` and a hyphenated or dotted name matches its word.
+        let components: Vec<&str> = cwd
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|c| !c.is_empty())
+            .collect();
+        if words
+            .iter()
+            .any(|w| components.iter().any(|c| name_matches(w, c)))
+            && !winners.contains(&cwd)
+        {
+            winners.push(cwd);
+        }
+    }
+    match winners[..] {
+        [one] => Some(one),
+        _ => None,
+    }
+}
+
+/// `--repo` as given, or the project the query names when `--repo` is
+/// absent and one indexed cwd is the unambiguous match. The caller holds
+/// an open store: the candidate cwds come from `sessions` over the whole
+/// corpus (subagents included, a high limit: the point is coverage, not
+/// page length).
+fn repo_or_resolved(
+    store: &RecallStore,
+    query: &str,
+    repo: Option<&str>,
+) -> Result<Option<String>, String> {
+    if let Some(repo) = repo {
+        return Ok(Some(expand_repo(repo)));
+    }
+    let rows = store
+        .sessions(None, None, None, None, true, 500)
+        .map_err(|e| e.to_string())?;
+    Ok(resolve_repo_from_query(
+        query,
+        rows.iter()
+            .map(|r| r.cwd.as_deref())
+            .collect::<Vec<_>>()
+            .into_iter(),
+    )
+    .map(ToString::to_string))
 }
 
 fn session_line(s: &SessionRow) -> String {
@@ -1396,6 +1512,55 @@ mod tests {
         assert!(is_fresh(Some(now - LAZY_FRESH_MS + 1), now));
         assert!(!is_fresh(Some(now - LAZY_FRESH_MS), now));
         assert!(!is_fresh(Some(1), now));
+    }
+
+    /// A name matches itself and a name one edit apart, never two.
+    #[test]
+    fn name_matches_accepts_one_edit_not_two() {
+        assert!(name_matches("Tuyau", "tuyau"));
+        assert!(name_matches("pixl", "pixel"));
+        assert!(name_matches("pixal", "pixel")); // one substitution
+        assert!(name_matches("tuyao", "tuyau")); // one edit: allowed
+        assert!(!name_matches("pixl", "pix"));
+        assert!(!name_matches("tuya", "zuyau")); // two edits: rejected
+        assert!(!name_matches("benchmark", "benchmarks2"));
+    }
+
+    /// A query that names one indexed project resolves to it; an ambiguous
+    /// or empty name resolves to nothing and the search runs unfiltered.
+    #[test]
+    fn the_query_names_one_project_or_none() {
+        let cwds = [
+            Some("/Users/me/Documents/g-1-tuyau"),
+            Some("/Users/me/Documents/pixel"),
+            Some("/Users/me/other"),
+            None,
+        ];
+        let all: Vec<Option<&str>> = cwds.to_vec();
+        assert_eq!(
+            resolve_repo_from_query("in the tuyau project", all.iter().copied()),
+            Some("/Users/me/Documents/g-1-tuyau")
+        );
+        // "pixel" matches two candidates' components (pixel and… none here):
+        assert_eq!(
+            resolve_repo_from_query("what happened on pixel", all.iter().copied()),
+            Some("/Users/me/Documents/pixel")
+        );
+        // "me" is shared by every path: ambiguous → None.
+        assert_eq!(
+            resolve_repo_from_query("find things under me", all.iter().copied()),
+            None
+        );
+        // Stopwords and short words are not names.
+        assert_eq!(
+            resolve_repo_from_query("the and for from", all.iter().copied()),
+            None
+        );
+        // A mis-typed name one edit apart still resolves.
+        assert_eq!(
+            resolve_repo_from_query("in the tuyao project", all.iter().copied()),
+            Some("/Users/me/Documents/g-1-tuyau")
+        );
     }
 
     /// Minimal adapter: counts its calls so the tests can prove the
