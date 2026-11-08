@@ -6,6 +6,9 @@ The `recall` plugin for [Pixel](https://github.com/Pixel-CLI/pixel):
 `pixel-recall` binary. It used to be built into `pixel`; it lives here so the
 core stays small and only the people who search their sessions install it.
 
+This README follows the plugin README standard
+([docs/PLUGIN_README.md](docs/PLUGIN_README.md)).
+
 | Command | What it does |
 | --- | --- |
 | `pixel recall index` | ingest transcript sources into the corpus (incremental; `--full` rebuilds the lexical segments) |
@@ -16,6 +19,7 @@ core stays small and only the people who search their sessions install it.
 | `pixel recall context <query>` | token-budgeted context pack for a query (`--budget`) |
 | `pixel recall export --out <dir>` | bulk-export sessions, one file each (`md` or `jsonl`) |
 | `pixel recall setup` / `embed` | download the embedding model once; embed pending turns (resumable) |
+| `pixel recall retro` | mine recent sessions for friction: failed tool calls, raw-search bypasses, retry loops (`--since`, `--agent`, `--limit`, `--json`) |
 | `pixel recall status` | corpus freshness, counts and location |
 | `pixel recall daemon start\|stop\|status` | the corpus daemon: watches every CLI's transcript store, keeps the corpus and embeddings fresh, serves warm-model `ask` |
 
@@ -48,7 +52,7 @@ cargo install --git https://github.com/Pixel-CLI/pixel-recall pixel-recall-plugi
 source install, through `pixel-recall` on `PATH`. `pixel-recall recall …` is the
 same command line.
 
-## The corpus and its daemon
+## Data and configuration
 
 Everything lives under `PIXEL_RECALL_DIR` (default
 `~/.local/share/pixel/recall`): the SQLite corpus, the lexical segments, the
@@ -63,12 +67,34 @@ started, as long as both pin a core commit with the same `PROTOCOL_VERSION`.
 Features `fastembed` (ONNX) and `model2vec` (pure Rust) are on by default, as in
 `pixel`; `--no-default-features --features model2vec` builds for musl.
 
-## Environment
-
 The host passes `PIXEL_API`, `PIXEL_REPO_ROOT`, `PIXEL_GRAPH_DB` and
 `PIXEL_BIN`; none is read, a corpus belongs to the machine and not to a
 repository. `PIXEL_RECALL_DIR`, `PIXEL_RECALL_MODEL` and
 `PIXEL_OUTPUT_CAP_BYTES` behave as they did in the built-in.
+
+**Privacy.** The corpus is the machine's transcripts and nothing else:
+Claude Code, Codex, Cursor, Devin, Gemini, opencode, pi and Z Code session
+logs under your home directory, read locally, indexed locally. Nothing
+leaves the machine except one download: `recall setup` (and the first
+semantic query) fetches the embedding model named by `PIXEL_RECALL_MODEL`
+into the models directory. Run `--lexical-only` (or skip `setup`) and no
+network is used at all. `export` writes transcript text to a folder you
+name — that is you copying your own data, not the plugin sending it.
+
+`pixel recall retro` reads the same corpus: sessions in the window, their
+turns, and the signals below. It suggests nothing automatically; each
+observation names its session and turn so you can read it with
+`pixel recall show <ref> --turn N`.
+
+- **failed tool call** — a tool turn whose text starts like an error
+  (`error:`, `panicked`, `exit code`, …).
+- **raw search bypass** — an assistant turn that reached for recursive
+  `rg`/`grep -r` or `git log -S`/`git blame` instead of the pixel skill.
+- **retry loop** — the same pixel search command run three times or more
+  in one session.
+
+A quiet window prints `no sessions in the window` or `no friction
+signals` honestly; nothing is inferred beyond the turns that exist.
 
 ## Differences from the built-in
 
@@ -81,6 +107,22 @@ repository. `PIXEL_RECALL_DIR`, `PIXEL_RECALL_MODEL` and
 - **The daemon restart command line.** The daemon is re-run as
   `pixel-recall daemon start --foreground`, not `pixel recall daemon start
   --foreground`; a daemon started by one is found and stopped by the other.
+- **`retro` has no built-in predecessor.** It is new code (see [issue
+  #2](https://github.com/Pixel-CLI/pixel-recall/issues/2), ported in spirit
+  from the old `pixel-retro` skill of the core repo): no golden parity case
+  is recorded for it; its behaviour is tested directly
+  (`the_retro_pass_finds_friction_and_leaves_a_clean_session_quiet`).
+- **Old helper scripts are not carried over.** The `pixel-retro` skill's
+  Python helpers stayed in the core repo when the capability moved here:
+
+| Old helper | What it did | Retained here? | Why |
+| --- | --- | --- |
+| `lead_time.py` | measured PRs from first edit to validated CI, and where agents waited | ❌ left out | it reads the GitHub API, not the transcript corpus; a plugin that stays local-only is the point of issue #2 |
+| `adherence.py` | checked transcript behaviour against a repo's stated rules | ❌ left out | rule text is repo config, not corpus search — belongs in the core repo's own tooling, not a transcript plugin |
+| `slow.py` | grouped slow read ops from `.pixel/actions.jsonl` with their `serve` traces | ❌ left out | reads pixel's action log, which the core repo keeps writing; the plugin reads only its own corpus |
+| `roots.py` | enumerated repository roots from sessions in a window | ✅ subsumed | `pixel recall sessions --since` + the cwd the corpus already stores cover it |
+| `ledger.py` / `seen.tsv` | skipped frictions already reported/fixed | ❌ left out | a first-cut `retro` re-reports what it re-finds; a ledger is a follow-up, not a port |
+
 
 ## Where the code comes from
 
