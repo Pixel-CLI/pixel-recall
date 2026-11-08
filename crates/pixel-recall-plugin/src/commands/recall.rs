@@ -124,6 +124,20 @@ pub enum RecallCmd {
     },
     /// Download and verify the embedding model (one-time).
     Setup,
+    /// Mine recent sessions for friction: failed tool calls, bypasses and
+    /// retry loops, each with the turn that shows it.
+    Retro {
+        /// Relative (24h, 3w, 12h) or ISO date lower bound.
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+        /// Most recent sessions to scan (they carry the turns).
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Embed pending turns into the semantic index (resumable).
     Embed {
         /// Drop all vectors and re-embed the whole corpus.
@@ -260,6 +274,12 @@ pub fn run_recall(cmd: RecallCmd) -> Result<(), String> {
             json,
         } => run_show(&session_ref, turn.as_deref(), json),
         RecallCmd::Setup => run_setup(),
+        RecallCmd::Retro {
+            since,
+            agent,
+            limit,
+            json,
+        } => run_retro(since, agent, limit, json),
         RecallCmd::Embed { rebuild } => run_embed(rebuild),
         RecallCmd::Ask {
             query,
@@ -554,6 +574,187 @@ fn run_context(
     // Composed text, not a JSON document: `write_stdout` is what keeps these
     // bytes in the output counters the metrics line reports.
     crate::output::write_stdout(&out)
+}
+
+/// The first `max` characters of `text`, not bytes: a corpus full of
+/// curly quotes and ellipses panics a byte slice.
+fn head_chars_of(text: &str, max: usize) -> &str {
+    text.char_indices()
+        .nth(max)
+        .map_or(text, |(end, _)| &text[..end])
+}
+
+/// Text a tool turn shows when the command it ran failed. Broad on
+/// purpose: the report only points at the turn, a human reads it.
+fn tool_text_is_failure(text: &str) -> bool {
+    let head = head_chars_of(text, 400);
+    head.contains("error:")
+        || head.contains("Error:")
+        || head.contains("panicked")
+        || head.contains("unexpected argument")
+        || head.contains("unrecognized")
+        || head.contains("not found")
+        || head.contains("exit code")
+        || head.contains("exited with code 1")
+        || head.contains("FAILED")
+}
+
+/// An assistant turn that reached for raw `rg`/`grep`/`git archaeology`
+/// instead of the pixel skill: the bypass the retro report exists to
+/// surface.
+fn assistant_text_is_bypass(text: &str) -> bool {
+    let head = head_chars_of(text, 400);
+    // Recursive search of a source tree, not a targeted read: `rg`/`grep -r`
+    // over a path, or git archaeology. A plain `grep -n file` is a read.
+    (head.contains("rg -")
+        || head.contains("rg \"")
+        || head.contains("rg '")
+        || head.contains("grep -r")
+        || head.contains("grep -rn")
+        || head.contains("grep -ir"))
+        || (head.contains("git log -S") || head.contains("git blame"))
+}
+
+/// One observation the retro pass made, with the turn that shows it.
+#[derive(Debug, PartialEq)]
+struct RetroObservation {
+    session_id: i64,
+    agent: String,
+    source_session_id: String,
+    seq: i64,
+    ts: Option<i64>,
+    cwd: Option<String>,
+    kind: &'static str,
+    snippet: String,
+}
+
+/// The first line of `text`, cut to `max` chars: the snippet a report
+/// shows, so a whole dump never lands in the output.
+fn first_line_capped(text: &str, max: usize) -> String {
+    let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    line.chars().take(max).collect()
+}
+
+/// Mine one session's turns for friction signals: failed tool calls,
+/// raw-search bypasses and retry loops (the same pixel search command
+/// three times or more). Every observation carries the session and turn
+/// it came from.
+fn retro_signals(
+    session: &SessionRow,
+    turns: &[pixel_recall::store::TurnRow],
+) -> Vec<RetroObservation> {
+    const SNIPPET: usize = 160;
+    let mut out = Vec::new();
+    let mut pixel_calls: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for t in turns {
+        let mut obs = |kind: &'static str, snippet: String| {
+            out.push(RetroObservation {
+                session_id: session.id,
+                agent: session.agent.clone(),
+                source_session_id: session.source_session_id.clone(),
+                seq: t.seq,
+                ts: t.ts,
+                cwd: session.cwd.clone(),
+                kind,
+                snippet,
+            })
+        };
+        match t.role.as_str() {
+            "tool" if tool_text_is_failure(&t.text) => {
+                obs("failed tool call", first_line_capped(&t.text, SNIPPET));
+            }
+            "assistant" => {
+                if assistant_text_is_bypass(&t.text) {
+                    obs("raw search bypass", first_line_capped(&t.text, SNIPPET));
+                }
+                if t.text.contains("pixel search") || t.text.contains("pixel find") {
+                    let line = first_line_capped(&t.text, SNIPPET);
+                    let count = pixel_calls.entry(line.clone()).or_insert(0);
+                    *count += 1;
+                    if *count == 3 {
+                        obs("retry loop", line);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `pixel recall retro`: sessions in the window, each mined for the
+/// friction signals above. Honest about a quiet window and about a
+/// corpus that has nothing indexed.
+fn run_retro(
+    since: Option<String>,
+    agent: Option<String>,
+    limit: usize,
+    json: bool,
+) -> Result<(), String> {
+    check_limit(limit)?;
+    let mut store = open_store()?;
+    lazy_catch_up(&mut store);
+    let now = now_ms();
+    let since_ms = since.as_deref().map(|s| parse_time(s, now)).transpose()?;
+    let rows = store
+        .sessions(agent.as_deref(), None, since_ms, None, true, limit)
+        .map_err(|e| e.to_string())?;
+    let mut observations = Vec::new();
+    for s in &rows {
+        let turns = store
+            .turns_for_session(s.id, None)
+            .map_err(|e| e.to_string())?;
+        observations.extend(retro_signals(s, &turns));
+    }
+    if json {
+        let out = json!({
+            "sessions": rows.len(),
+            "observations": observations.iter().map(|o| json!({
+                "session_id": o.session_id,
+                "agent": o.agent,
+                "source_session_id": o.source_session_id,
+                "seq": o.seq,
+                "ts": o.ts,
+                "cwd": o.cwd,
+                "kind": o.kind,
+                "snippet": o.snippet,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{out}");
+        return Ok(());
+    }
+    if rows.is_empty() {
+        println!("no sessions in the window — nothing to mine");
+        return Ok(());
+    }
+    if observations.is_empty() {
+        println!(
+            "no friction signals in {} session(s) — failed calls, bypasses, retry loops",
+            rows.len()
+        );
+        return Ok(());
+    }
+    for o in &observations {
+        let ts = o.ts.map_or_else(|| "?".to_string(), format_ms);
+        println!(
+            "{}:{} #{} t{} {} {} [{}] \"{}\"",
+            o.agent,
+            &o.source_session_id[..o.source_session_id.len().min(8)],
+            o.session_id,
+            o.seq,
+            ts,
+            o.cwd.as_deref().unwrap_or("-"),
+            o.kind,
+            o.snippet
+        );
+    }
+    println!(
+        "{} observation(s) across {} session(s) — read a turn with `pixel recall show <agent:>id-prefix --turn N`",
+        observations.len(),
+        rows.len()
+    );
+    Ok(())
 }
 
 fn run_setup() -> Result<(), String> {
@@ -1148,8 +1349,8 @@ fn resolve_repo_from_query<'a>(
 /// `--repo` as given, or the project the query names when `--repo` is
 /// absent and one indexed cwd is the unambiguous match. The caller holds
 /// an open store: the candidate cwds come from `sessions` over the whole
-/// corpus (subagents included, a high limit: the point is coverage, not
-/// page length).
+/// corpus (subagents included, every row — a project not touched recently
+/// still resolves; a few tens of thousands of rows is one indexed query).
 fn repo_or_resolved(
     store: &RecallStore,
     query: &str,
@@ -1159,7 +1360,7 @@ fn repo_or_resolved(
         return Ok(Some(expand_repo(repo)));
     }
     let rows = store
-        .sessions(None, None, None, None, true, 500)
+        .sessions(None, None, None, None, true, 100_000)
         .map_err(|e| e.to_string())?;
     Ok(resolve_repo_from_query(
         query,
@@ -1512,6 +1713,79 @@ mod tests {
         assert!(is_fresh(Some(now - LAZY_FRESH_MS + 1), now));
         assert!(!is_fresh(Some(now - LAZY_FRESH_MS), now));
         assert!(!is_fresh(Some(1), now));
+    }
+
+    /// The retro pass finds failed tool calls, raw-search bypasses and
+    /// retry loops, each with the turn that shows it — and a clean session
+    /// reports nothing.
+    #[test]
+    fn the_retro_pass_finds_friction_and_leaves_a_clean_session_quiet() {
+        use pixel_recall::store::{SessionRow, TurnRow};
+        let session = |id: i64, agent: &str| SessionRow {
+            id,
+            agent: agent.to_string(),
+            source_session_id: format!("s-0000000{id}"),
+            source_path: format!("/p/{id}"),
+            cwd: Some("/Users/me/Documents/pixel".to_string()),
+            git_branch: None,
+            title: Some("title".to_string()),
+            first_user_prompt: None,
+            ts_first: Some(1),
+            ts_last: Some(2),
+            ts_source: pixel_recall::model::TsSource::Iso,
+            turn_count: 0,
+            is_subagent: false,
+            parent_session_id: None,
+        };
+        let turn = |seq: i64, role: &str, text: &str| TurnRow {
+            id: seq,
+            session_id: 1,
+            seq,
+            role: role.to_string(),
+            intent_source: None,
+            ts: Some(seq),
+            text: text.to_string(),
+            truncated: false,
+        };
+        let s = session(1, "claude");
+        let turns = vec![
+            turn(1, "user", "do a thing"),
+            turn(2, "tool", "error: could not compile `x` — exit code 1"),
+            turn(
+                3,
+                "assistant",
+                "⋮tool bash {\"command\":\"rg -n needle .\"}",
+            ),
+            turn(4, "assistant", "pixel search-content needle"),
+            turn(5, "assistant", "pixel search-content needle"),
+            turn(6, "assistant", "pixel search-content needle"),
+        ];
+        let found = retro_signals(&s, &turns);
+        let kinds: Vec<&str> = found.iter().map(|o| o.kind).collect();
+        assert!(
+            kinds.contains(&"failed tool call"),
+            "the error turn must be observed: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"raw search bypass"),
+            "the rg turn must be observed: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"retry loop"),
+            "three identical pixel search calls must be observed: {kinds:?}"
+        );
+        for o in &found {
+            assert_eq!(o.session_id, 1, "every observation names its session");
+            assert_eq!(o.agent, "claude");
+            assert_eq!(o.cwd.as_deref(), Some("/Users/me/Documents/pixel"));
+            assert!(o.snippet.chars().count() <= 160, "snippet stays short");
+        }
+        // A clean session reports nothing.
+        let clean = retro_signals(
+            &session(2, "pi"),
+            &[turn(1, "user", "hi"), turn(2, "tool", "ok")],
+        );
+        assert!(clean.is_empty(), "a clean session must stay quiet");
     }
 
     /// A name matches itself and a name one edit apart, never two.
